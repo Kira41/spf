@@ -2,7 +2,7 @@
 
 #### Description
 
-This tool demonstrates how to perform an ARP spoofing attack on a Local Area Network (LAN) using Python and the `Scapy` library. The ARP spoofing attack redirects network traffic from the victim to the attacker by sending forged ARP responses, allowing for a Man-in-the-Middle (MITM) attack. The attacker impersonates the router or gateway to intercept the victim's traffic and forward it through the attacker's machine.
+This tool demonstrates how to perform an ARP spoofing attack on a Local Area Network (LAN) using Python and the `Scapy` library. The ARP spoofing attack redirects network traffic from the victim to the attacker by sending forged ARP responses, allowing for a Man-in-the-Middle (MITM) attack. The attacker impersonates the router or gateway to intercept the victim's traffic and forward it through the attacker's machine. The script now behaves similarly to NetCut by continuously poisoning both the victim and the gateway, keeping the connection hijacked until you stop the program.
 
 With this script, you can simulate a MITM attack, allowing the attacker to intercept non-encrypted traffic from the target device.
 
@@ -40,17 +40,18 @@ Make sure to specify the correct IP addresses and the network interface.
 
 #### Command:
 ```bash
-sudo python spoofer.py -t <target_ip> -s <spoofed_ip> -i <interface>
+sudo python spoofer.py -t <target_ip> -g <gateway_ip> -i <interface> [--interval <seconds>]
 ```
 
 #### Example:
 ```bash
-sudo python spoofer.py -t 192.168.1.130 -s 192.168.1.1 -i eth0
+sudo python spoofer.py -t 192.168.1.130 -g 192.168.1.1 -i eth0 --interval 1.5
 ```
 
 - `-t` or `--target`: The victim's IP address.
-- `-s` or `--spoof`: The IP address you want to spoof (e.g., the router).
+- `-g` or `--gateway`: The router/gateway IP address to impersonate.
 - `-i` or `--interface`: The network interface to use (e.g., `eth0`, `wlan0`).
+- `--interval`: (Optional) Seconds between each pair of ARP responses; lower values act more aggressively.
 
 When the program is interrupted (e.g., by pressing `CTRL+C`), the script will automatically restore the ARP tables of the victim and the router to their original state.
 
