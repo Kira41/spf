@@ -1,7 +1,9 @@
 #!/usr/bin/python
 
-import scapy.all as scapy
 import argparse
+import sys
+
+import scapy.all as scapy
 from colorama import Fore, Style, init
 
 # Initialize colorama
@@ -51,9 +53,18 @@ class ArpSpoofer:
             self.restore(self.spoof_ip, self.target_ip)
             print(Fore.GREEN + "[+] ARP tables restored.")
 
+class ExampleArgumentParser(argparse.ArgumentParser):
+    """Argument parser that prints a helpful usage example on errors."""
+
+    def error(self, message):
+        self.print_usage(sys.stderr)
+        example = "python spoofer.py -t 192.168.1.130 -s 192.168.1.1 -i eth0"
+        self.exit(2, f"{self.prog}: error: {message}\nExample: {example}\n")
+
+
 if __name__ == "__main__":
     # Setting up argparse for command-line arguments
-    parser = argparse.ArgumentParser(description="ARP Spoofing Tool to sniff network traffic.")
+    parser = ExampleArgumentParser(description="ARP Spoofing Tool to sniff network traffic.")
     parser.add_argument("-t", "--target", required=True, help="Target IP address to spoof.")
     parser.add_argument("-s", "--spoof", required=True, help="Spoofed IP address (e.g., the gateway IP).")
     parser.add_argument("-i", "--interface", required=True, help="Network interface to use (e.g., eth0, wlan0).")

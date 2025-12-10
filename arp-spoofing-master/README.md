@@ -40,12 +40,12 @@ Make sure to specify the correct IP addresses and the network interface.
 
 #### Command:
 ```bash
-sudo ./spoofing.py -t <target_ip> -s <spoofed_ip> -i <interface>
+sudo python spoofer.py -t <target_ip> -s <spoofed_ip> -i <interface>
 ```
 
 #### Example:
 ```bash
-sudo ./spoofing.py -t 192.168.1.130 -s 192.168.1.1 -i eth0
+sudo python spoofer.py -t 192.168.1.130 -s 192.168.1.1 -i eth0
 ```
 
 - `-t` or `--target`: The victim's IP address.
