@@ -252,17 +252,29 @@ def get_own_mac():
     return ":".join([mac_num[e:e+2] for e in range(0, 12, 2)])
 
 
+def _get_mac_for_ip(target_ip, online_devices):
+    """Return the MAC address for ``target_ip`` from either a dict or list of devices."""
+    if isinstance(online_devices, dict):
+        return online_devices.get(target_ip, "")
+
+    for device in online_devices:
+        if isinstance(device, dict) and device.get("ip") == target_ip:
+            return device.get("mac", "")
+
+    return ""
+
+
 def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
     """
     Perform ARP spoofing using the MAC address from the pre-scanned online devices.
-    
+
     Args:
         target_ip (str): IP address of the target device.
         spoof_ip (str): IP address of the router to spoof.
-        online_devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
+        online_devices (Iterable): Previously scanned devices containing IP and MAC addresses.
         count (int): Number of ARP packets to send.
     """
-    target_mac = online_devices.get(target_ip, "").lower()
+    target_mac = _get_mac_for_ip(target_ip, online_devices).lower()
     
     if not target_mac:
         print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online and scanned.")
