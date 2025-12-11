@@ -564,7 +564,7 @@ def prompt_for_spoof(online_devices):
     for idx, device in enumerate(online_devices, start=1):
         print(
             f"{Colors.OKCYAN}{idx}. IP: {device['ip']}, MAC: {device['mac']}, "
-            f"Device: {device['device_type']}{Colors.ENDC}"
+            f"Device: {device['device_type']}, Name: {device['hostname']}{Colors.ENDC}"
         )
 
     try:
