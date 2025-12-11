@@ -1,4 +1,6 @@
 import ipaddress
+import logging
+import os
 import re
 import socket
 import subprocess
@@ -19,6 +21,17 @@ class Colors:
     ENDC = "\033[0m"
     BOLD = "\033[1m"
     UNDERLINE = "\033[4m"
+
+
+# Configure logging
+DEBUG_LOGGING = os.getenv("NETCUT_DEBUG", "").lower() in {"1", "true", "yes", "on", "debug"}
+LOG_LEVEL = logging.DEBUG if DEBUG_LOGGING else logging.INFO
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%H:%M:%S",
+)
+logger = logging.getLogger(__name__)
 
 
 # Try to use scapy optionally when available
@@ -69,6 +82,7 @@ def is_router_ip(ip: str) -> bool:
         
 def run_cmd(cmd):
     """Run a command and return stdout as text."""
+    logger.debug("Running command: %s", cmd)
     result = subprocess.run(
         cmd,
         capture_output=True,
@@ -77,6 +91,7 @@ def run_cmd(cmd):
         errors="ignore",
         shell=False,
     )
+    logger.debug("Command %s finished with return code %s", cmd, result.returncode)
     return result.stdout
 
 
@@ -99,6 +114,7 @@ def get_mac_from_arp_cache(ip: str) -> str:
     Use 'arp -a' to find MAC for a specific IP. Retry if not found initially.
     """
     max_attempts = 3
+    logger.debug("Looking up MAC for %s in ARP cache", ip)
     for attempt in range(max_attempts):
         output = run_cmd(["arp", "-a", ip])
         mac_pattern = re.compile(
@@ -110,8 +126,10 @@ def get_mac_from_arp_cache(ip: str) -> str:
             if m:
                 mac = normalize_mac(m.group(1))
                 if mac and mac not in {"ff:ff:ff:ff:ff:ff", "00:00:00:00:00:00"}:
+                    logger.debug("Found MAC %s for %s on attempt %d", mac, ip, attempt + 1)
                     return mac
         time.sleep(1)  # Wait before retrying
+    logger.debug("No MAC found for %s after %d attempts", ip, max_attempts)
     return ""
 
 
@@ -123,6 +141,7 @@ def get_from_arp_cmd():
     Read ARP table via 'arp -a'.
     Extract IP, MAC, ARP Type.
     """
+    logger.info("Collecting entries from 'arp -a'")
     output = run_cmd(["arp", "-a"])
     lines = output.splitlines()
 
@@ -154,6 +173,7 @@ def get_from_arp_cmd():
                 "arp_type": arp_type.lower(),
             })
 
+    logger.info("Found %d ARP entries", len(entries))
     return entries
 
 
@@ -165,6 +185,7 @@ def get_from_netsh_neighbors():
       netsh interface ip show neighbors
     Extract IP, MAC, State/Type.
     """
+    logger.info("Collecting entries from 'netsh interface ip show neighbors'")
     output = run_cmd(["netsh", "interface", "ip", "show", "neighbors"])
     lines = output.splitlines()
 
@@ -198,6 +219,7 @@ def get_from_netsh_neighbors():
                     "arp_type": arp_type,
                 })
 
+    logger.info("Found %d netsh neighbor entries", len(entries))
     return entries
 
 
@@ -217,12 +239,15 @@ def get_local_network_cidr():
         try:
             local_ip = socket.gethostbyname(socket.gethostname())
         except Exception:
+            logger.debug("Unable to determine local IP for CIDR detection")
             return None
 
     try:
         net = ipaddress.ip_network(local_ip + "/24", strict=False)
+        logger.debug("Detected local network CIDR: %s", net)
         return str(net)
     except Exception:
+        logger.debug("Failed to parse network CIDR from local IP %s", local_ip)
         return None
 
 
@@ -231,10 +256,12 @@ def get_from_scapy_active_scan():
     Optional ARP active scan using scapy.
     """
     if not (SCAPY_AVAILABLE and USE_SCAPY_ACTIVE_SCAN):
+        logger.debug("Skipping scapy active scan (available=%s, enabled=%s)", SCAPY_AVAILABLE, USE_SCAPY_ACTIVE_SCAN)
         return []
 
     network = get_local_network_cidr()
     if not network:
+        logger.info("No network CIDR detected; skipping scapy scan")
         return []
 
     try:
@@ -253,8 +280,10 @@ def get_from_scapy_active_scan():
                 "mac": received.hwsrc.lower(),
                 "arp_type": "dynamic",
             })
+        logger.info("Scapy scan discovered %d entries", len(entries))
         return entries
     except Exception:
+        logger.exception("Scapy active scan failed")
         return []
 
 
@@ -289,12 +318,13 @@ def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
         count (int): Number of ARP packets to send.
     """
     target_mac = _get_mac_for_ip(target_ip, online_devices)
-    
+
     if not target_mac:
         print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online and scanned.")
         return
 
     our_mac = get_own_mac()
+    logger.info("Starting ARP spoof: target_ip=%s, spoof_ip=%s, target_mac=%s, our_mac=%s", target_ip, spoof_ip, target_mac, our_mac)
 
     arp_response = ARP(
         op=2,
@@ -309,6 +339,7 @@ def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
     for _ in range(count):
         sendp(packet, verbose=False)
         time.sleep(1)  # Short delay between sends
+    logger.info("Completed sending %d spoof packets to %s", count, target_ip)
     print(f"ARP Spoofing sent {count} times from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
 
 
@@ -342,6 +373,7 @@ def merge_entries(*lists_of_entries):
     Merge all results by IP.
     Keep first "good" MAC and ARP type.
     """
+    logger.debug("Merging %d entry lists", len(lists_of_entries))
     merged = {}
 
     for entries in lists_of_entries:
@@ -376,6 +408,7 @@ def merge_entries(*lists_of_entries):
         data["interfaces"] = ", ".join(sorted(data["interfaces"])) if data["interfaces"] else ""
         data["sources"] = ", ".join(sorted(data["sources"])) if data["sources"] else ""
 
+    logger.info("Merged into %d unique IPs", len(merged))
     return merged
 
 
@@ -439,9 +472,11 @@ def enrich_hosts_parallel(merged):
         return ip, online, hostname, dev_type, mac
 
     if not ips:
+        logger.info("No IPs to enrich")
         return info
 
     max_workers = min(32, len(ips))
+    logger.debug("Enriching %d IPs using %d worker threads", len(ips), max_workers)
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         future_to_ip = {executor.submit(task, ip): ip for ip in ips}
         for future in as_completed(future_to_ip):
@@ -453,6 +488,7 @@ def enrich_hosts_parallel(merged):
                 "mac": mac or "Unknown",
             }
 
+    logger.info("Finished enriching %d hosts", len(info))
     return info
 
 
@@ -478,6 +514,8 @@ def print_device_table(title, devices, title_color=Colors.OKGREEN):
 def scan_network():
     print(f"{Colors.HEADER}Scanning network (grouping ONLINE and OFFLINE devices)...{Colors.ENDC}\n")
 
+    logger.info("Starting network scan")
+
     online_devices = []
     offline_devices = []
 
@@ -487,6 +525,7 @@ def scan_network():
 
     merged = merge_entries(arp_entries, netsh_entries, scapy_entries)
     all_ips = sorted(merged.keys(), key=lambda ip: list(map(int, ip.split(".")))) if merged else []
+    logger.debug("Sorted %d IPs for enrichment", len(all_ips))
     hostinfo = enrich_hosts_parallel(merged)
 
     for ip in all_ips:
@@ -507,6 +546,8 @@ def scan_network():
 
     print_device_table("=== ONLINE DEVICES ===", online_devices, title_color=Colors.OKGREEN)
     print_device_table("=== OFFLINE / CACHED DEVICES ===", offline_devices, title_color=Colors.WARNING)
+
+    logger.info("Network scan complete: %d online, %d offline", len(online_devices), len(offline_devices))
 
     return online_devices, offline_devices
 
@@ -558,6 +599,7 @@ def print_menu():
 
 
 def main():
+    logger.info("NETCUT_DEBUG=%s", DEBUG_LOGGING)
     online_devices = []
     offline_devices = []
 
