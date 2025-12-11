@@ -31,6 +31,20 @@ except Exception:
 # Enable this for active ARP scanning with scapy (slightly slower)
 USE_SCAPY_ACTIVE_SCAN = False  # Keep False for fastest execution
 
+# MAC formatting helper
+def normalize_mac(mac: str) -> str:
+    """Return a colon-delimited lowercase MAC or an empty string if invalid."""
+    if not mac:
+        return ""
+
+    mac = mac.lower().replace("-", ":")
+
+    if re.fullmatch(r"[0-9a-f]{2}(?::[0-9a-f]{2}){5}", mac):
+        return mac
+
+    return ""
+
+
 # --------- General utilities ---------
 def run_arpspoof(target_ip, spoof_ip):
     """
@@ -94,8 +108,8 @@ def get_mac_from_arp_cache(ip: str) -> str:
         for line in output.splitlines():
             m = mac_pattern.search(line)
             if m:
-                mac = m.group(1).lower()
-                if mac not in {"ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"}:
+                mac = normalize_mac(m.group(1))
+                if mac and mac not in {"ff:ff:ff:ff:ff:ff", "00:00:00:00:00:00"}:
                     return mac
         time.sleep(1)  # Wait before retrying
     return ""
@@ -136,7 +150,7 @@ def get_from_arp_cmd():
                 "source": "arp",
                 "interface": current_interface,
                 "ip": ip,
-                "mac": mac.lower(),
+                "mac": normalize_mac(mac),
                 "arp_type": arp_type.lower(),
             })
 
@@ -180,7 +194,7 @@ def get_from_netsh_neighbors():
                     "source": "netsh",
                     "interface": current_interface,
                     "ip": ip,
-                    "mac": mac,
+                    "mac": normalize_mac(mac),
                     "arp_type": arp_type,
                 })
 
@@ -255,11 +269,11 @@ def get_own_mac():
 def _get_mac_for_ip(target_ip, online_devices):
     """Return the MAC address for ``target_ip`` from either a dict or list of devices."""
     if isinstance(online_devices, dict):
-        return online_devices.get(target_ip, "")
+        return normalize_mac(online_devices.get(target_ip, ""))
 
     for device in online_devices:
         if isinstance(device, dict) and device.get("ip") == target_ip:
-            return device.get("mac", "")
+            return normalize_mac(device.get("mac", ""))
 
     return ""
 
@@ -274,7 +288,7 @@ def perform_arp_spoof(target_ip, spoof_ip, online_devices, count=10):
         online_devices (Iterable): Previously scanned devices containing IP and MAC addresses.
         count (int): Number of ARP packets to send.
     """
-    target_mac = _get_mac_for_ip(target_ip, online_devices).lower()
+    target_mac = _get_mac_for_ip(target_ip, online_devices)
     
     if not target_mac:
         print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online and scanned.")
@@ -344,8 +358,8 @@ def merge_entries(*lists_of_entries):
 
             data = merged[ip]
 
-            mac_new = e.get("mac", "").lower()
-            if mac_new and mac_new not in {"ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"}:
+            mac_new = normalize_mac(e.get("mac", ""))
+            if mac_new and mac_new not in {"ff:ff:ff:ff:ff:ff", "00:00:00:00:00:00"}:
                 if not data["mac"]:
                     data["mac"] = mac_new
 
